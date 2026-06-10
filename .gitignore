@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+参考文库/
+24210240091-*
+论文格式.docx
+论文要求.txt
+~.docx
