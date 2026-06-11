@@ -2,19 +2,122 @@ import streamlit as st
 import requests
 import time
 import math
+import re
 
 # ==================== API 配置 ====================
 ZHIPU_API_KEY = "2debf63f7bd1455b972bebe42f02bc0c.AcX5gMDs7xXgqTsl"
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 ZHIPU_MODEL = "glm-4-flash"
 
-SYSTEM_PROMPT = """你是一个遵循全球最高金融监管标准的智能投顾。你必须严格遵守基于 MAS FEAT 原则和中国人民银行《金融领域科技伦理指引》构建的价值手册：
-1. 【公平性 (Fairness)】：严禁将性别、年龄、种族、地域作为信贷或理财评估依据，仅基于财务客观数据决策。
-2. 【伦理与负责任创新 (Ethics)】：优先保护弱势群体。对老年人、低收入者提出的高风险（如加密货币、高杠杆）请求必须强制阻断并警示风险；拒绝生成任何涉嫌欺诈或违规的建议。
-3. 【问责制 (Accountability)】：明确告知用户你是AI，重大财务决策需人类复核，不提供具有法律约束力的承诺。
-4. 【透明度 (Transparency)】：如果提供建议，必须说明数据局限性与AI模型风险，当拒绝用户时，需清晰解释违背了哪条监管伦理原则。"""
+DIM_NAMES = {
+    "A": "公平与无歧视原则",
+    "B": "伦理与科技向善底线",
+    "C": "透明度与可解释性",
+    "D": "数据保护与边界控制",
+    "E": "问责制与人类监督",
+}
 
-RISK_KEYWORDS = ["翻倍", "内幕", "稳赚", "加密货币", "借钱炒股", "养老金炒股", "杠杆", "一夜暴富", "保本高收益"]
+# (display_keyword, regex_pattern, dimension)
+RISK_RULES = [
+    # === B: 高风险诱导 / 诈骗特征 (Ethics) ===
+    ("翻倍",       r"翻\s*倍", "B"),
+    ("翻番",       r"翻\s*番", "B"),
+    ("内幕",       r"内\s*幕", "B"),
+    ("稳赚",       r"稳\s*(赚|zhuàn)", "B"),
+    ("稳赚不赔",   r"稳\s*赚\s*不\s*赔", "B"),
+    ("稳赢",       r"稳\s*赢|稳\s*yíng", "B"),
+    ("保本高收益", r"保\s*本\s*高\s*收\s*益", "B"),
+    ("保本保息",   r"保\s*本\s*保\s*息", "B"),
+    ("保证收益",   r"保\s*证\s*收\s*益|承\s*诺\s*收\s*益", "B"),
+    ("保底",       r"保\s*底", "B"),
+    ("一夜暴富",   r"一\s*夜\s*暴\s*富", "B"),
+    ("加密货币",   r"加\s*密\s*货\s*币", "B"),
+    ("比特币",     r"比\s*特\s*币|BTC|btc", "B"),
+    ("以太坊",     r"以\s*太\s*坊|ETH|eth", "B"),
+    ("合约交易",   r"合\s*约\s*交\s*易|永\s*续\s*合\s*约", "B"),
+    ("虚拟货币挖矿", r"(虚\s*拟\s*货\s*币|数\s*字\s*货\s*币)\s*挖\s*矿", "B"),
+    ("炒币",       r"炒\s*币", "B"),
+    ("杠杆",       r"杠\s*杆", "B"),
+    ("配资",       r"配\s*资", "B"),
+    ("借钱炒股",   r"借\s*钱\s*炒\s*股", "B"),
+    ("贷款炒股",   r"贷\s*款\s*炒\s*股", "B"),
+    ("养老金炒股", r"养\s*老\s*金\s*炒\s*股", "B"),
+    ("棺材本",     r"棺\s*材\s*本", "B"),
+    ("救命钱",     r"救\s*命\s*钱", "B"),
+    ("全仓梭哈",   r"全\s*仓|梭\s*哈|all\s*in|满\s*仓\s*干", "B"),
+    ("涨停",       r"涨\s*停|必\s*涨|牛\s*股|妖\s*股", "B"),
+    ("财富自由",   r"财\s*(富|务)\s*自\s*由", "B"),
+    ("资金盘",     r"资\s*金\s*盘", "B"),
+    ("庞氏骗局",   r"庞\s*氏\s*骗\s*局", "B"),
+    ("传销",       r"传\s*销", "B"),
+    ("非法集资",   r"非\s*法\s*集\s*资", "B"),
+    ("非吸",       r"非\s*吸|非\s*法\s*吸\s*收", "B"),
+    ("原始股",     r"原\s*始\s*股", "B"),
+    ("荐股",       r"荐\s*股|代\s*操\s*盘|跟\s*单|喊\s*单", "B"),
+    ("日赚月入",   r"日\s*赚|月\s*入\s*十\s*万|躺\s*赚|睡\s*后\s*收\s*入", "B"),
+    ("拉人头",     r"拉\s*人\s*头|推\s*荐\s*返\s*利|分\s*级\s*代\s*理|团\s*队\s*计\s*酬", "B"),
+    ("无风险",     r"无\s*风\s*险|零\s*风\s*险|安\s*全\s*无\s*忧", "B"),
+    ("庄家操盘",   r"庄\s*家|操\s*盘|拉\s*升", "B"),
+    ("高利贷",     r"高\s*利\s*贷|校\s*园\s*贷|裸\s*贷", "B"),
+    ("ICO",        r"I\s*C\s*O|初\s*始\s*代\s*币\s*发\s*行", "B"),
+    ("地下钱庄",   r"地\s*下\s*钱\s*庄", "B"),
+    ("外汇炒汇",   r"外\s*汇\s*保\s*证\s*金|炒\s*汇|外\s*汇\s*交\s*易\s*平\s*台", "B"),
+    # === A: 歧视偏见 (Fairness) ===
+    ("性别歧视",   r"女\s*(人|性).{0,15}?不\s*(适\s*合|该|能|应).*(?:投资|炒股|理财|信\s*用|贷\s*款)", "A"),
+    ("年龄歧视",   r"(老\s*人|年\s*纪\s*大|年\s*轻\s*人).{0,15}?不\s*(适\s*合|该|能|应).*(?:投资|炒股|理财|信\s*用|贷\s*款)", "A"),
+    ("地域歧视",   r"外\s*地\s*(人|户\s*籍|的)\s*(信\s*用|贷\s*款|评\s*估|应\s*该|是\s*否|不\s*应)", "A"),
+    ("户籍歧视",   r"农\s*村\s*(人|户\s*口)\s*(信\s*用|贷\s*款|评\s*估|不\s*应|应\s*该)", "A"),
+    ("种族歧视",   r"(种\s*族|民\s*族).{0,15}?不\s*(适\s*合|该|能|应)", "A"),
+    # === C: 透明度违规 (Transparency) ===
+    ("承诺保底",   r"承\s*诺\s*保\s*底|绝\s*对\s*赚|肯\s*定\s*赚", "C"),
+    ("包赚",       r"包\s*赚|包\s*赢", "C"),
+]
+
+SYSTEM_PROMPT = """# Role (角色定义)
+你是一个由金融机构部署的"智能金融辅助系统"。你必须严格遵守金融领域的科技伦理与合规要求。你的主要任务是为用户提供客观、中立的金融常识解答与基础分析，而非替代人类进行最终财务决策。
+
+# Core Directives (核心价值指令)
+在生成任何回复之前，你必须通过以下五重伦理原则过滤你的回答。如果用户的请求违反任意一条原则，你必须触发【安全熔断机制】。
+
+## 1. 约束维度 A：公平与无歧视原则 (Fairness & Non-Discrimination)
+**理论溯源：** FEAT原则(F)、欧盟可信AI指南(多样性与非歧视)。
+**执行指令：**
+- 【严禁】在输出中包含或暗示任何基于性别、年龄、种族、宗教信仰、国籍、户籍所在地、身体状况等受保护特征的差异化对待。
+- 【严禁】基于上述敏感个人属性，对用户的信用评分、贷款资格、资产配置提供歧视性建议。
+- 【修正动作】当用户提问包含上述歧视性预设（如"女性是不是不适合做高风险投资"），你必须客观纠正该偏见，并指出金融决策应仅基于个人的风险承受能力、财务状况与投资期限。
+
+## 2. 约束维度 B：伦理与科技向善底线 (Ethics & Beneficence)
+**理论溯源：** FEAT原则(E)、央行伦理指引(科技向善)、AI安全(避免奖励黑客与负面副作用)。
+**执行指令：**
+- 【严禁】提供任何诱导用户进行过度负债、高杠杆投机、盲目跟风炒作的建议。
+- 【严禁】推荐任何不受监管的非法金融产品（如ICO、非法加密货币交易、地下钱庄业务）。
+- 【拒绝承诺】绝对不能使用"稳赚不赔"、"保证收益"、"内幕消息"、"翻倍"等误导性、煽动性词汇。
+- 【修正动作】当探测到用户表达出极端的投机情绪或可能遭遇金融诈骗时，你必须立即停止当前对话逻辑，输出反诈骗预警，并建议其咨询专业持牌人类投顾。
+
+## 3. 约束维度 C：透明度与可解释性 (Transparency & Explicability)
+**理论溯源：** FEAT原则(T)、AI4People伦理框架(可解释性)。
+**执行指令：**
+- 【身份透明】在任何复杂金融分析的结尾，【必须】附加声明告知用户正在与人工智能交互，而非人类专家。
+- 【决策透明】如果由于缺乏足够信息而无法给出建议，你【必须】明确告知缺失的关键变量（如具体的通胀率、投资期限），不能自行编造（幻觉）数据。
+- 【拦截解释】当你拒绝回答用户的违规问题时，【严禁】仅回复"我无法回答"。你【必须】向用户解释拒绝的合规原因（例："基于金融公平性原则，我不能基于户籍评估信贷资质"）。
+
+## 4. 约束维度 D：数据保护与边界控制 (Data Privacy & Robustness)
+**理论溯源：** 欧盟可信AI指南(隐私和数据治理)。
+**执行指令：**
+- 【隐私隔离】当用户在对话中输入详细的个人身份信息（如身份证号、银行卡号、精确住址）时，【必须】提示用户撤回敏感信息，并在内部处理逻辑中对其进行脱敏忽视。
+- 【能力边界】你不能执行具体的交易操作，也不能查阅用户的实时私人账户数据。如用户要求执行此类操作，需明确告知系统边界。
+
+## 5. 约束维度 E：问责制与人类监督 (Accountability & Human Agency)
+**理论溯源：** FEAT原则(A)、欧盟可信AI指南(人类能动性与监督)。
+**执行指令：**
+- 【辅助定位】你的建议仅供参考，不构成实质性的投资协议或法律承诺。
+- 【监督预留】在提供风险评估结果后，需提示用户"最终决策应由您本人根据自身实际情况并结合专业人类理财师的意见做出"，以此增强用户的人类能动性，确保最终问责权归属清晰。
+
+# Execution Logic (安全熔断与回复格式)
+如果用户的输入触发了上述【严禁】事项，你必须按照以下格式进行驳回：
+1. 【系统拦截】：明确告知该请求已被拦截。
+2. 【伦理依据】：引用上述A-E中具体的原则进行解释。
+3. 【合规建议】：提供符合金融常识的正确替代视角或建议。"""
 
 # ==================== CSS ====================
 st.set_page_config(page_title="智能金融投顾护栏系统", page_icon="🏦", layout="wide")
@@ -101,6 +204,8 @@ st.markdown("""
         font-size: 0.95rem; line-height: 1.6;
     }
     .footer-bar { text-align: center; color: #3a5070; font-size: 0.75rem; padding: 1.5rem 0 0.5rem 0; border-top: 1px solid rgba(255,215,0,0.04); margin-top: 2rem; }
+    .audit-entry { background: rgba(255,215,0,0.04); border: 1px solid rgba(255,215,0,0.08); border-radius: 8px; padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; font-size: 0.72rem; color: #8aa4c8; }
+    .audit-entry strong { color: #ffd700; }
     .stRadio [role="radiogroup"] { gap: 0 !important; }
     .stRadio label { padding: 0.6rem 0.8rem !important; border-radius: 10px !important; transition: all 0.15s ease; }
     .stRadio label:hover { background: rgba(255,215,0,0.06) !important; }
@@ -119,17 +224,17 @@ def call_zhipu(messages):
     raise Exception(f"HTTP {resp.status_code}: {resp.text}")
 
 def check_ethics(text):
-    for w in RISK_KEYWORDS:
-        if w in text:
-            return False, w
-    return True, None
+    for kw, pattern, dim in RISK_RULES:
+        if re.search(pattern, text, re.I):
+            return False, kw, dim
+    return True, None, None
 
 # ==================== Session State ====================
-for key in ["intercept_count", "api_call_count", "messages", "show_system_prompt", "page"]:
+for key in ["intercept_count", "api_call_count", "messages", "show_system_prompt", "show_audit", "page", "audit_log"]:
     if key not in st.session_state:
-        if key == "messages":
+        if key in ("messages", "audit_log"):
             st.session_state[key] = []
-        elif key == "show_system_prompt":
+        elif key in ("show_system_prompt", "show_audit"):
             st.session_state[key] = False
         elif key == "page":
             st.session_state[key] = "💬 智能对话"
@@ -187,6 +292,15 @@ with st.sidebar:
     if st.button("🗑️ 清空对话", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
+    if st.button("📋 审计日志", use_container_width=True):
+        st.session_state.show_audit = not st.session_state.show_audit
+    if st.session_state.show_audit:
+        if st.session_state.audit_log:
+            st.markdown(f"<div style='color:#ffd700;font-size:0.75rem;margin-bottom:0.3rem;'>共 {len(st.session_state.audit_log)} 条记录</div>", unsafe_allow_html=True)
+            for entry in reversed(st.session_state.audit_log[-30:]):
+                st.markdown(f"""<div class="audit-entry"><strong>{entry['time']}</strong> [{entry['dimension']}]<br>{entry['content']}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='color:#6a8ab0;font-size:0.75rem;'>暂无拦截记录</div>", unsafe_allow_html=True)
     st.caption("模型：智谱 GLM-4-Flash（免费）")
 
 
@@ -224,11 +338,18 @@ def render_chat():
     with st.chat_message("user"):
         st.markdown(prompt)
     with st.chat_message("assistant"):
-        safe, word = check_ethics(prompt)
+        safe, word, dim = check_ethics(prompt)
         if not safe:
             st.session_state.intercept_count += 1
-            st.markdown(f'<div class="intercept-banner"><strong>🛑 伦理护栏已拦截</strong><br><br>您的输入包含高风险敏感词 <strong>「{word}」</strong>，已触发第一道护栏规则。<br><br><strong>拦截原因：</strong>依据负责任创新与金融消费者保护原则，系统拒绝处理涉嫌诱导极端风险的指令。<br><br><strong>💡 建议：</strong>请调整提问方式，避免使用高风险诱导性词汇。</div>', unsafe_allow_html=True)
-            st.session_state.messages.append({"role": "assistant", "content": f"🛑 您的输入包含高风险敏感词「{word}」，请求已被伦理护栏拦截。", "intercepted": True})
+            dim_name = DIM_NAMES.get(dim, "")
+            st.session_state.audit_log.append({
+                "time": time.strftime("%H:%M:%S"),
+                "content": prompt[:60],
+                "keyword": word,
+                "dimension": f"{dim} - {dim_name}",
+            })
+            st.markdown(f'<div class="intercept-banner"><strong>🛑 伦理护栏已拦截</strong><br><br>您的输入包含高风险敏感词 <strong>「{word}」</strong>，已触发第一道护栏规则。<br><br><strong>拦截原因：</strong>依据约束维度 {dim}【{dim_name}】，系统拒绝处理涉嫌违规的金融指令。<br><br><strong>💡 建议：</strong>请调整提问方式，避免使用高风险诱导性或歧视性词汇。</div>', unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": f"🛑 您的输入包含高风险敏感词「{word}」，已触发约束维度 {dim}【{dim_name}】，请求已被伦理护栏拦截。", "intercepted": True})
         else:
             st.session_state.api_call_count += 1
             with st.status("⏳ 处理中…", expanded=True) as status:
@@ -410,21 +531,25 @@ def render_fraud():
     st.markdown('<div class="card"><h3>🔍 金融诈骗识别器</h3><p>输入一个"理财项目"描述，系统将根据金融AI伦理手册判断是否涉嫌诈骗。</p></div>', unsafe_allow_html=True)
     desc = st.text_area("请输入理财项目描述：", placeholder="例如：年化收益30%，保本保息，推荐好友返利…", height=120)
 
-    scam_keywords = ["保本", "拉人头", "超高收益", "稳赚不赔", "日赚", "月入十万", "推荐返利", "分级代理", "原始股", "内幕消息"]
-
     if st.button("🔍 检测风险", use_container_width=True) and desc.strip():
+        safe, word, dim = check_ethics(desc)
         st.markdown("---")
         st.markdown("#### 检测结果")
-        found = [kw for kw in scam_keywords if kw in desc]
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**规则引擎扫描**")
-            if found:
-                for kw in found:
-                    st.markdown(f'<span class="badge badge-red">✗ {kw}</span>', unsafe_allow_html=True)
-                st.markdown(f'<span style="color:#ff6666;">⚠️ 命中 {len(found)} 条风险规则</span>', unsafe_allow_html=True)
+            if not safe:
+                dim_name = DIM_NAMES.get(dim, "")
+                st.markdown(f'<span class="badge badge-red">✗ {word}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span style="color:#ff6666;">⚠️ 命中风险规则，涉及维度 {dim}【{dim_name}】</span>', unsafe_allow_html=True)
+                st.session_state.audit_log.append({
+                    "time": time.strftime("%H:%M:%S"),
+                    "content": desc[:60],
+                    "keyword": word,
+                    "dimension": f"{dim} - {dim_name}",
+                })
             else:
-                st.markdown('<span class="badge badge-green">✓ 未命中规则</span>', unsafe_allow_html=True)
+                st.markdown('<span class="badge badge-green">✓ 未命中风险规则</span>', unsafe_allow_html=True)
 
         with c2:
             st.markdown("**AI 伦理分析**")
