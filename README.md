@@ -14,3 +14,6 @@ streamlit run app.py
 
 \\	oml
 ZHIPU_API_KEY = " your_api_key_here\
+
+
+> auto-deploy: rebuilding with slim requirements
