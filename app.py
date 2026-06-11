@@ -144,8 +144,8 @@ st.markdown("""
         border: 1px solid rgba(255,215,0,0.18);
         box-shadow: 0 8px 40px rgba(0,0,0,0.35);
     }
-    .main-header h1 { color: #ffd700; margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: 1.5px; }
-    .main-header p { color: #8899bb; margin: 0.3rem 0 0 0; font-size: 0.95rem; }
+    .main-header h1 { color: #ffd700; margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: 1.5px; text-align: center; }
+    .main-header p { color: #8899bb; margin: 0.3rem 0 0 0; font-size: 0.95rem; text-align: center; }
     .card {
         background: linear-gradient(135deg, rgba(15,31,58,0.85) 0%, rgba(26,45,79,0.85) 100%);
         backdrop-filter: blur(8px);
@@ -245,7 +245,7 @@ for key in ["intercept_count", "api_call_count", "messages", "show_system_prompt
 st.markdown("""
 <div class="main-header">
     <h1>🏦 智能金融投顾 · 价值对齐护栏系统</h1>
-    <p>负责任创新（RRI）框架 · 宪法AI（Constitutional AI）理念 · 双层伦理护栏架构</p>
+    <p>负责任创新框架 · 宪法AI理念 · 双层伦理护栏架构</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -283,8 +283,8 @@ with st.sidebar:
     <hr style="border-color:rgba(255,215,0,0.08);margin:0.6rem 0;">
     <div style="font-size:0.75rem;color:#6a8ab0;line-height:1.5;">
         📖 <strong>参考官方文件：</strong><br>
-        • <a href="https://www.mas.gov.sg/regulation/guidelines/feat-principles" target="_blank" style="color:#8ab4f8;text-decoration:none;">新加坡 MAS FEAT 原则</a><br>
-        • <a href="https://www.pbc.gov.cn/tiaofasi/144941/144959/5226441/index.html" target="_blank" style="color:#8ab4f8;text-decoration:none;">中国人民银行《金融领域科技伦理指引》</a><br>
+        • <a href="https://sgai.md/pdfs/mas-feat-zh.pdf" target="_blank" style="color:#8ab4f8;text-decoration:none;">新加坡 MAS FEAT 原则（中文版）</a><br>
+        • <a href="https://www.hbbill.com/uploadFiles/-16/548/058/54/%E3%80%8A%E9%87%91%E8%9E%8D%E9%A2%86%E5%9F%9F%E7%A7%91%E6%8A%80%E4%BC%A6%E7%90%86%E6%8C%87%E5%BC%95%E3%80%8B%EF%BC%88JRT%200258%E2%80%942022%EF%BC%89.pdf" target="_blank" style="color:#8ab4f8;text-decoration:none;">中国人民银行《金融领域科技伦理指引》（JRT 0258-2022）</a><br>
         • <a href="https://digital-strategy.ec.europa.eu/en/library/ethics-guidelines-trustworthy-ai" target="_blank" style="color:#8ab4f8;text-decoration:none;">欧盟《可信人工智能伦理指南》</a>
     </div>
 </div>
